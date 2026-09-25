@@ -1,8 +1,8 @@
-name: CD - Firebase App Distribution
+name: CD dev - Firebase App Distribution
 
 on:
   push:
-    branches: [develop]
+    branches: ['release/**']
   workflow_dispatch:
     inputs:
       release_notes:
@@ -11,7 +11,7 @@ on:
         default: "Manual build from workflow_dispatch"
 
 concurrency:
-  group: cd-dev
+  group: cd-dev-${{ github.ref }}
   cancel-in-progress: false
 
 env:
@@ -79,7 +79,7 @@ jobs:
       - name: Upload to Firebase App Distribution
         uses: wzieba/Firebase-Distribution-Github-Action@v1
         with:
-          appId: ${{ secrets.FIREBASE_APP_ID }}
+          appId: ${{ secrets.FIREBASE_APP_ID_DEV }}
           serviceCredentialsFileContent: ${{ secrets.FIREBASE_SERVICE_ACCOUNT }}
           groups: ${{ env.TESTER_GROUPS }}
           releaseNotes: ${{ steps.notes.outputs.text }}
