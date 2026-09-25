@@ -1,0 +1,50 @@
+#!/bin/sh
+# gitflow pre-commit — primary hook (central standard), emitted by `gitflow hook`
+# Do not edit by hand: reinstall with `gitflow hook > .githooks/pre-commit` to sync the latest rules.
+# Repo-specific rules go in .githooks/pre-commit.local (secondary hook) — this file calls it for you.
+#
+# Install once per clone:  git config core.hooksPath .githooks
+# git runs a single pre-commit file — so this is the primary gate for the central rules,
+# then it delegates the rest to the secondary hook.
+
+# symbolic-ref reads the branch name even before the first commit (unborn) — stops the
+# first commit from slipping through on main/develop.
+branch=$(git symbolic-ref --short -q HEAD || git rev-parse --abbrev-ref HEAD)
+
+# Gate 1) No committing directly on main / develop — branch first (GIT_FLOW.md 4.0/4.1)
+if [ "$branch" = "main" ] || [ "$branch" = "develop" ]; then
+  echo "COMMIT BLOCKED — on '$branch' · GIT_FLOW forbids committing here directly"
+  echo "   branch first:  git checkout -b docs/<slug>   (then run gitflow check)"
+  exit 1
+fi
+
+# Gate 2) Branch name must pass gitflow check (naming convention 2)
+#         soft dependency: if gitflow is not installed, skip this gate (never break the hook)
+if command -v gitflow >/dev/null 2>&1; then
+  if ! gitflow check >/dev/null 2>&1; then
+    echo "COMMIT BLOCKED — branch name '$branch' violates gitflow naming (2)"
+    echo "   see:  gitflow check"
+    exit 1
+  fi
+fi
+
+# Gate 3) Approval token — user has reviewed the full diff and approved (GIT_FLOW.md: review before commit)
+#         single-use: token is consumed on commit, the next commit needs fresh approval
+token=".git/COMMIT_APPROVED"
+if [ ! -f "$token" ]; then
+  echo "COMMIT BLOCKED — not yet reviewed + approved"
+  echo "   correct flow:  show full diff -> user approves -> touch $token -> commit"
+  exit 1
+fi
+rm -f "$token"
+
+# Secondary) Repo-specific rules (e.g. check Status matches STATUS.md) — write them in this
+#            secondary hook. It belongs to the downstream repo; the central rules above never touch it.
+local_hook=".githooks/pre-commit.local"
+if [ -x "$local_hook" ]; then
+  "$local_hook" || exit 1
+elif [ -f "$local_hook" ]; then
+  sh "$local_hook" || exit 1
+fi
+
+echo "gatekeeper: branch ok + approved — commit passes"
