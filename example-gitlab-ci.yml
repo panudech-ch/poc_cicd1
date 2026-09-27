@@ -1,0 +1,404 @@
+variables:
+  CD_ENV:
+    value: "-"
+    options:
+      - "-"
+      - "dev"
+      - "uat"
+      - "prod"
+    description: "Select build environment."
+
+stages:
+  - Test
+  - Deploy Localize
+  - Deploy Dev IOS
+  - Deploy Dev Android
+  - Deploy Uat IOS
+  - Deploy Uat Android
+  - Deploy PROD IOS
+  - Deploy PROD Android Firebase
+  - Deploy PROD Android Google Play
+  - Deploy Live IOS
+  - Deploy Live Android
+
+.macos_saas_runners:
+  tags:
+    - macos-m2
+  image: macos-14-xcode-15
+
+# ----------------- TEST -----------------
+
+Unit Test:
+  extends: .macos_saas_runners
+  stage: Test
+  script:
+    - flutter pub run build_runner build --delete-conflicting-outputs
+    - flutter pub global activate get_cli
+    - export PATH="$PATH":"$HOME/.pub-cache/bin"
+    - brew install jq || true
+    - ./translate.sh dev
+    - mkdir -p gl-code-quality
+    - flutter analyze > gl-code-quality/analyze.txt 2>&1 || true
+    - dart run tool/gitlab_code_quality.dart gl-code-quality/analyze.txt gl-code-quality-report.json
+    - TEST_DIRS=$(grep -v '^\s*#' .githooks/test_modules | grep -v '^\s*$' | tr '\n' ' ')
+    - mkdir -p test-results
+    - |
+      set +e
+      flutter test --coverage --file-reporter=json:test-results/flutter-test.json $TEST_DIRS
+      TEST_EXIT_CODE=$?
+      dart run tool/flutter_test_junit.dart test-results/flutter-test.json test-results/junit.xml
+      set -e
+    # Post golden (UI) before/after diff images onto the MR (no-op if none failed)
+    - ./tool/golden_mr_report.sh || true
+    - brew install lcov || true
+    - lcov --summary coverage/lcov.info
+    # Convert lcov -> Cobertura so GitLab can show per-line coverage in the MR diff
+    - pip3 install lcov_cobertura --break-system-packages || pip3 install --user lcov_cobertura || pip3 install lcov_cobertura
+    - python3 -m lcov_cobertura coverage/lcov.info --output coverage.xml --base-dir .
+    - exit ${TEST_EXIT_CODE:-0}
+  coverage: '/lines\.*:\s*(\d+\.\d+)%/'
+  artifacts:
+    when: always
+    paths:
+      - coverage.xml
+      - gl-code-quality/analyze.txt
+      - gl-code-quality-report.json
+      - test-results/flutter-test.json
+      - test-results/junit.xml
+      # Golden UI diff images (master/test/isolatedDiff/maskedDiff) on failure
+      - "test/**/failures/"
+    reports:
+      junit: test-results/junit.xml
+      coverage_report:
+        coverage_format: cobertura
+        path: coverage.xml
+      codequality: gl-code-quality-report.json
+  rules:
+    - if: '$CI_PIPELINE_SOURCE == "merge_request_event"'
+      when: manual
+      allow_failure: true
+
+# ----------------- LOCALIZATION -----------------
+
+Deploy Localize:
+  extends: .macos_saas_runners
+  stage: Deploy Localize
+  script:
+    - echo "Running deploy Localize"
+    - curl --location 'http://dev-app-api.amaze-x.com/r4m/localization/v1/localizes/publish'
+  when: manual
+
+# ----------------- DEV -----------------
+
+Deploy Dev Android:
+  extends: .macos_saas_runners
+  stage: Deploy Dev Android
+  before_script:
+    - export LC_ALL=en_US.UTF-8
+    - export LANG=en_US.UTF-8
+    - export PATH="/opt/homebrew/bin:/usr/local/bin:/Users/ausdawut.mas/Documents/flutter/bin:$PATH"
+    # แก้ไข: แยกไปใช้ Gemfile ของ Android
+    - export BUNDLE_GEMFILE=$(pwd)/android/Gemfile
+    - cd android
+    - bundle config set --local path 'vendor/bundle'
+    - bundle install
+    - cd ..
+  script:
+    - flutter pub get
+    - flutter pub global activate get_cli
+    - export PATH="$PATH":"$HOME/.pub-cache/bin"
+    - brew install jq || true
+    - flutter packages pub run build_runner build --delete-conflicting-outputs
+    - rm -rf assets/locales
+    - ./translate.sh dev
+    - flutter build apk -t lib/main_dev.dart --flavor=dev --build-number ${CI_PIPELINE_ID} --release
+    - cd android
+    - bundle exec fastlane firebase_app_distribution_release build_number:${CI_PIPELINE_ID}
+    - cd ..
+    - mkdir -p ~/latest-apk
+    - cp build/app/outputs/flutter-apk/app-dev-release.apk ~/latest-apk/app-release.apk || cp build/app/outputs/flutter-apk/app-release.apk ~/latest-apk/
+    - ./notification.sh dev $CI_PROJECT_NAME $CI_PIPELINE_ID $CI_COMMIT_SHA
+  when: manual
+  rules:
+    - if: $CI_PIPELINE_SOURCE == "schedule"
+      when: always
+    - if: '$CI_COMMIT_BRANCH'
+      when: manual
+
+Deploy Dev IOS:
+  extends: .macos_saas_runners
+  stage: Deploy Dev IOS
+  before_script:
+    - export LC_ALL=en_US.UTF-8
+    - export LANG=en_US.UTF-8
+    - export PATH="/opt/homebrew/bin:/usr/local/bin:/Users/ausdawut.mas/Documents/flutter/bin:$PATH"
+    - export BUNDLE_GEMFILE=$(pwd)/ios/Gemfile
+    - cd ios
+    - bundle config set --local path 'vendor/bundle'
+    - bundle install
+    - cd ..
+  script:
+    - rm -rf .dart_tool
+    - cd ios && bundle exec fastlane increment_build_number_ios build_number:${CI_PIPELINE_ID}
+    - cd ..
+    - flutter packages pub run build_runner build --delete-conflicting-outputs
+    - flutter clean
+    - flutter pub get
+    - flutter pub global activate get_cli
+    - export PATH="$PATH":"$HOME/.pub-cache/bin"
+    - brew install jq || true
+    - rm -rf assets/locales
+    - ./translate.sh dev
+    - cd ios
+    - rm -rf Pods Podfile.lock
+    - pod repo update
+    - pod install
+    - cd ..
+    - flutter build ipa -t lib/main_dev.dart --flavor=dev --release --export-options-plist=ios/Runner/exportOptions.plist
+    - cd ios
+    - bundle exec fastlane beta_dev
+    - cd ..
+    - ./notification.sh dev $CI_PROJECT_NAME $CI_PIPELINE_ID $CI_COMMIT_SHORT_SHA
+  when: manual
+  rules:
+    - if: '$CI_COMMIT_BRANCH'
+
+# ----------------- UAT -----------------
+
+Deploy Uat IOS:
+  extends: .macos_saas_runners
+  stage: Deploy Uat IOS
+  before_script:
+    - export LC_ALL=en_US.UTF-8
+    - export LANG=en_US.UTF-8
+    - export PATH="/opt/homebrew/bin:/usr/local/bin:/Users/ausdawut.mas/Documents/flutter/bin:$PATH"
+    - export BUNDLE_GEMFILE=$(pwd)/ios/Gemfile
+    - cd ios
+    - bundle config set --local path 'vendor/bundle'
+    - bundle install
+    - cd ..
+  script:
+    - curl --location 'http://uat-app-api.amaze-x.com/r4m/localization/v1/localizes/publish'
+    - flutter packages pub run build_runner build --delete-conflicting-outputs
+    - flutter pub get
+    - flutter pub global activate get_cli
+    - export PATH="$PATH":"$HOME/.pub-cache/bin"
+    - brew install jq || true
+    - rm -rf assets/locales
+    - ./translate.sh uat
+    - ./check_transltation.sh
+    - cd ios
+    - rm -rf Pods Podfile.lock
+    - pod repo update
+    - pod install
+    - cd ..
+    - flutter build ipa -t lib/main_uat.dart --flavor=uat --release --export-options-plist=ios/exportOptionsUAT.plist
+    - cd ios
+    - bundle exec fastlane beta_uat
+    - cd ..
+    - ./notification.sh uat $CI_PROJECT_NAME $CI_PIPELINE_ID $CI_COMMIT_SHORT_SHA
+  when: manual
+  rules:
+    - if: '$CI_COMMIT_BRANCH'
+
+Deploy Uat Android:
+  extends: .macos_saas_runners
+  stage: Deploy Uat Android
+  before_script:
+    - export LC_ALL=en_US.UTF-8
+    - export LANG=en_US.UTF-8
+    - export PATH="/opt/homebrew/bin:/usr/local/bin:/Users/ausdawut.mas/Documents/flutter/bin:$PATH"
+    - export BUNDLE_GEMFILE=$(pwd)/android/Gemfile
+    - cd android
+    - bundle config set --local path 'vendor/bundle'
+    - bundle install
+    - cd ..
+  script:
+    - flutter pub get
+    - flutter packages pub run build_runner build --delete-conflicting-outputs
+    - flutter pub global activate get_cli
+    - export PATH="$PATH":"$HOME/.pub-cache/bin"
+    - brew install jq || true
+    - rm -rf assets/locales
+    - ./translate.sh uat
+    - ./check_transltation.sh
+    - flutter build apk -t lib/main_uat.dart --flavor=uat --release
+    - cd android
+    - bundle exec fastlane uat_firebase_app_distribution_release
+    - cd ..
+    - mkdir -p ~/latest-apk
+    - cp build/app/outputs/flutter-apk/app-uat-release.apk ~/latest-apk/app-release.apk || cp build/app/outputs/flutter-apk/app-release.apk ~/latest-apk/
+    - ./notification.sh uat $CI_PROJECT_NAME $CI_PIPELINE_ID $CI_COMMIT_SHA
+  when: manual
+  rules:
+    - if: '$CI_COMMIT_BRANCH'
+
+# ----------------- PROD -----------------
+
+Deploy PROD IOS:
+  extends: .macos_saas_runners
+  stage: Deploy PROD IOS
+  before_script:
+    - export LC_ALL=en_US.UTF-8
+    - export LANG=en_US.UTF-8
+    - export PATH="/opt/homebrew/bin:/usr/local/bin:/Users/ausdawut.mas/Documents/flutter/bin:$PATH"
+    - export BUNDLE_GEMFILE=$(pwd)/ios/Gemfile
+    - cd ios
+    - bundle config set --local path 'vendor/bundle'
+    - bundle install
+    - cd ..
+  script:
+    - curl --location 'https://app-api.amaze.shop/r4m/localization/v1/localizes/publish'
+    - flutter packages pub run build_runner build --delete-conflicting-outputs
+    - flutter pub get
+    - flutter pub global activate get_cli
+    - export PATH="$PATH":"$HOME/.pub-cache/bin"
+    - brew install jq || true
+    - rm -rf assets/locales
+    - ./translate.sh prod
+    - ./check_transltation.sh
+    - cd ios
+    - rm -rf Pods Podfile.lock
+    - pod install
+    - cd ..
+    - flutter build ipa -t lib/main_prod.dart --flavor=prod --release --export-options-plist=ios/exportOptionsProd.plist
+    - cd ios
+    - bundle exec fastlane beta_prod
+    - cd ..
+    - ./notification.sh prod $CI_PROJECT_NAME $CI_PIPELINE_ID $CI_COMMIT_SHORT_SHA
+  when: manual
+  rules:
+    - if: '$CI_COMMIT_BRANCH'
+
+Deploy PROD Android Firebase:
+  extends: .macos_saas_runners
+  stage: Deploy PROD Android Firebase
+  before_script:
+    - export LC_ALL=en_US.UTF-8
+    - export LANG=en_US.UTF-8
+    - export PATH="/opt/homebrew/bin:/usr/local/bin:/Users/ausdawut.mas/Documents/flutter/bin:$PATH"
+    - export BUNDLE_GEMFILE=$(pwd)/android/Gemfile
+    - cd android
+    - bundle config set --local path 'vendor/bundle'
+    - bundle install
+    - cd ..
+  script:
+    - curl --location 'https://app-api.amaze.shop/r4m/localization/v1/localizes/publish'
+    - flutter packages pub run build_runner build --delete-conflicting-outputs
+    - flutter pub get
+    - flutter pub global activate get_cli
+    - export PATH="$PATH":"$HOME/.pub-cache/bin"
+    - brew install jq || true
+    - rm -rf assets/locales
+    - ./translate.sh prod
+    - ./check_transltation.sh
+    - flutter build apk -t lib/main_prod.dart --flavor=prod --release
+    - cd android
+    - bundle exec fastlane prod_firebase_app_distribution_release
+    - cd ..
+    - mkdir -p ~/latest-apk
+    - cp build/app/outputs/flutter-apk/app-prod-release.apk ~/latest-apk/app-release.apk || cp build/app/outputs/flutter-apk/app-release.apk ~/latest-apk/
+    - ./notification.sh prod $CI_PROJECT_NAME $CI_PIPELINE_ID $CI_COMMIT_SHA
+  when: manual
+  rules:
+    - if: '$CI_COMMIT_BRANCH'
+
+Deploy PROD Android Google Play:
+  extends: .macos_saas_runners
+  stage: Deploy PROD Android Google Play
+  before_script:
+    - export LC_ALL=en_US.UTF-8
+    - export LANG=en_US.UTF-8
+    - export PATH="/opt/homebrew/bin:/usr/local/bin:/Users/ausdawut.mas/Documents/flutter/bin:$PATH"
+    - export BUNDLE_GEMFILE=$(pwd)/android/Gemfile
+    - cd android
+    - bundle config set --local path 'vendor/bundle'
+    - bundle install
+    - cd ..
+  script:
+    - flutter packages pub run build_runner build --delete-conflicting-outputs
+    - flutter pub get
+    - flutter pub global activate get_cli
+    - export PATH="$PATH":"$HOME/.pub-cache/bin"
+    - brew install jq || true
+    - rm -rf assets/locales
+    - ./translate.sh prod
+    - ./check_transltation.sh
+    - flutter build appbundle -t lib/main_prod.dart --flavor=prod --release --target-platform android-arm,android-arm64
+    - cd android
+    - bundle exec fastlane supply --aab ../build/app/outputs/bundle/prodRelease/app-prod-release.aab --track internal
+    - cd ..
+    - ./notification.sh prod $CI_PROJECT_NAME $CI_PIPELINE_ID $CI_COMMIT_SHA
+  when: manual
+  rules:
+    - if: '$CI_COMMIT_BRANCH'
+
+# ----------------- LIVE -----------------
+
+Deploy Live IOS:
+  extends: .macos_saas_runners
+  stage: Deploy Live IOS
+  before_script:
+    - export LC_ALL=en_US.UTF-8
+    - export LANG=en_US.UTF-8
+    - export PATH="/opt/homebrew/bin:/usr/local/bin:/Users/ausdawut.mas/Documents/flutter/bin:$PATH"
+    - export BUNDLE_GEMFILE=$(pwd)/ios/Gemfile
+    - cd ios
+    - bundle config set --local path 'vendor/bundle'
+    - bundle install
+    - cd ..
+  script:
+    - curl --location 'http://dev-app-api.amaze-x.com/r4m/localization/v1/localizes/publish'
+    - flutter packages pub run build_runner build --delete-conflicting-outputs
+    - flutter pub get
+    - flutter pub global activate get_cli
+    - export PATH="$PATH":"$HOME/.pub-cache/bin"
+    - brew install jq || true
+    - rm -rf assets/locales
+    - ./translate.sh dev
+    - ./check_transltation.sh
+    - cd ios
+    - rm -rf Pods Podfile.lock
+    - pod install
+    - cd ..
+    - flutter build ipa -t lib/main_prod.dart --flavor=prod --release --export-options-plist=ios/exportOptionsProd.plist
+    - cd ios
+    - bundle exec fastlane beta_live
+    - cd ..
+    - ./notification.sh prod $CI_PROJECT_NAME $CI_PIPELINE_ID $CI_COMMIT_SHORT_SHA
+  when: manual
+  rules:
+    - if: '$CI_COMMIT_BRANCH'
+
+Deploy Live Android:
+  extends: .macos_saas_runners
+  stage: Deploy Live Android
+  before_script:
+    - export LC_ALL=en_US.UTF-8
+    - export LANG=en_US.UTF-8
+    - export PATH="/opt/homebrew/bin:/usr/local/bin:/Users/ausdawut.mas/Documents/flutter/bin:$PATH"
+    - export BUNDLE_GEMFILE=$(pwd)/android/Gemfile
+    - cd android
+    - bundle config set --local path 'vendor/bundle'
+    - bundle install
+    - cd ..
+  script:
+    - curl --location 'http://dev-app-api.amaze-x.com/r4m/localization/v1/localizes/publish'
+    - flutter packages pub run build_runner build --delete-conflicting-outputs
+    - flutter pub get
+    - flutter pub global activate get_cli
+    - export PATH="$PATH":"$HOME/.pub-cache/bin"
+    - brew install jq || true
+    - rm -rf assets/locales
+    - ./translate.sh dev
+    - ./check_transltation.sh
+    - flutter build apk -t lib/main_prod.dart --flavor=prod --release
+    - cd android
+    - bundle exec fastlane prod_firebase_app_distribution_live_release
+    - cd ..
+    - mkdir -p ~/latest-apk
+    - cp build/app/outputs/flutter-apk/app-prod-release.apk ~/latest-apk/app-release.apk || cp build/app/outputs/flutter-apk/app-release.apk ~/latest-apk/
+    - ./notification.sh prod $CI_PROJECT_NAME $CI_PIPELINE_ID $CI_COMMIT_SHA
+  when: manual
+  rules:
+    - if: '$CI_COMMIT_BRANCH'
