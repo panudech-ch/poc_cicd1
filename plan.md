@@ -33,9 +33,10 @@ Localization is specific to the reference project and is out of scope here.
 
 ---
 
-## Phase 1 — Foundation
+## Phase 1 — Foundation (done)
 
-Everything downstream depends on this phase.
+Everything downstream depends on this phase. Verified: `cd-dev.yml` run #5 delivered
+`1.0.0-dev (5)` to testers.
 
 ### 1.1 Add the `uat` flavor
 
@@ -94,23 +95,29 @@ run the exact same deploy from their own machine.
 
 ```
 android/
-  Gemfile               pins fastlane
+  Gemfile               fastlane, loads Pluginfile
+  Gemfile.lock          pinned versions
   fastlane/
     Fastfile            lane definitions
-    Appfile             package name, Firebase app ids
+    Appfile             package name
+    Pluginfile          fastlane-plugin-firebase_app_distribution
 ```
 
 ### 2.2 Lanes
 
-| Lane | Builds | Destination |
-|---|---|---|
-| `dev_firebase` | dev release APK | Firebase, group `testers` |
-| `uat_firebase` | uat release APK | Firebase, group `uat-testers` |
-| `prod_firebase` | prod release APK | Firebase, group `production` |
-| `live_firebase` | prod release APK | Firebase, group `live` |
-| `prod_play_internal` | prod release AAB | Google Play, internal track |
+Lane names and scope follow the reference. The CI file runs `flutter build`; the lane only
+uploads the artifact that build produced. App ids and credentials come from environment
+variables, never from the repository.
 
-Each lane takes `build_number` as a parameter, mirroring the reference pipeline.
+| Lane / command | Uploads | Destination | Status |
+|---|---|---|---|
+| `firebase_app_distribution_release` | dev release APK | Firebase, group `testers` | implemented, pending CI run |
+| `uat_firebase_app_distribution_release` | uat release APK | Firebase, group `uat-testers` | blocked: no uat Firebase app |
+| `prod_firebase_app_distribution_release` | prod release APK | Firebase, group `production` | blocked: no prod Firebase app |
+| `prod_firebase_app_distribution_live_release` | prod release APK | Firebase, group `live` | blocked: no prod Firebase app |
+| `supply --track internal` | prod release AAB | Google Play, internal track | blocked: no Play Console app |
+
+As in the reference, only the dev lane takes `build_number`.
 
 ### 2.3 Required credentials
 

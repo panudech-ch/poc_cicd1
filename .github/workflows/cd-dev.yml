@@ -14,7 +14,6 @@ concurrency:
 
 env:
   FLUTTER_VERSION: "3.44.4"
-  TESTER_GROUPS: testers
 
 jobs:
   distribute:
@@ -33,6 +32,12 @@ jobs:
           flutter-version: ${{ env.FLUTTER_VERSION }}
           channel: stable
           cache: true
+
+      - uses: ruby/setup-ruby@v1
+        with:
+          ruby-version: "3.3"
+          bundler-cache: true
+          working-directory: android
 
       - name: Install dependencies
         run: flutter pub get
@@ -74,15 +79,19 @@ jobs:
             echo "EOF"
           } >> "$GITHUB_OUTPUT"
 
+      - name: Restore Firebase service account
+        env:
+          FIREBASE_SERVICE_ACCOUNT: ${{ secrets.FIREBASE_SERVICE_ACCOUNT }}
+        run: echo "$FIREBASE_SERVICE_ACCOUNT" > "$RUNNER_TEMP/firebase-service-account.json"
+
       - name: Upload to Firebase App Distribution
-        uses: wzieba/Firebase-Distribution-Github-Action@v1
-        with:
-          appId: ${{ secrets.FIREBASE_APP_ID_DEV }}
-          serviceCredentialsFileContent: ${{ secrets.FIREBASE_SERVICE_ACCOUNT }}
-          groups: ${{ env.TESTER_GROUPS }}
-          releaseNotes: ${{ steps.notes.outputs.text }}
-          file: build/app/outputs/flutter-apk/app-dev-release.apk
+        working-directory: android
+        env:
+          FIREBASE_APP_ID_DEV: ${{ secrets.FIREBASE_APP_ID_DEV }}
+          FIREBASE_SERVICE_CREDENTIALS_FILE: ${{ runner.temp }}/firebase-service-account.json
+          RELEASE_NOTES: ${{ steps.notes.outputs.text }}
+        run: bundle exec fastlane firebase_app_distribution_release build_number:${{ github.run_number }}
 
       - name: Clean up signing material
         if: always()
-        run: rm -f android/app/release.jks android/key.properties
+        run: rm -f android/app/release.jks android/key.properties "$RUNNER_TEMP/firebase-service-account.json"
