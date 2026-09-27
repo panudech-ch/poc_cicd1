@@ -66,6 +66,12 @@ android {
             versionNameSuffix = "-dev"
             resValue("string", "app_name", "POC CICD Dev")
         }
+        create("uat") {
+            dimension = "env"
+            applicationIdSuffix = ".uat"
+            versionNameSuffix = "-uat"
+            resValue("string", "app_name", "POC CICD UAT")
+        }
         create("prod") {
             dimension = "env"
             resValue("string", "app_name", "POC CICD")

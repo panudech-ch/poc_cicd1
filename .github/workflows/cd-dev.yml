@@ -56,7 +56,7 @@ jobs:
           EOF
 
       - name: Build release APK
-        run: flutter build apk --flavor dev --release
+        run: flutter build apk -t lib/main_dev.dart --flavor dev --release --build-number ${{ github.run_number }}
 
       - name: Compose release notes
         id: notes
