@@ -156,7 +156,7 @@ Environments with required reviewers is the equivalent mechanism.
 
 | File | Trigger | Replaces |
 |---|---|---|
-| `ci.yml` | PR and push to develop/main/release | reference `Unit Test` stage |
+| `ci.yml` | `workflow_dispatch` | reference `Unit Test` stage |
 | `cd-android.yml` | `workflow_dispatch` + `schedule` | all Android deploy stages |
 | `cd-ios.yml` | `workflow_dispatch` | all iOS deploy stages (phase 5) |
 
@@ -176,9 +176,9 @@ stages as pipeline columns; GitHub has no such constraint.
 | Golden image diff on MR | upload `test/**/failures/` as an artifact |
 | `notification.sh` | Slack or Teams webhook step |
 
-The reference marks its test job `allow_failure: true`, so a failing test never blocks the
-pipeline. Whether to keep that behaviour is a decision for the lead — this plan defaults to
-tests blocking the merge, which is the stricter and more common setting.
+The reference runs its test job manually and marks it `allow_failure: true`, so a failing
+test never blocks the pipeline. This plan follows the reference: `ci.yml` is triggered by
+`workflow_dispatch` only and is not a required check.
 
 ---
 
