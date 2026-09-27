@@ -206,15 +206,26 @@ hosted rate.
 
 ## Outstanding items
 
-Carried over from earlier work in this repository; phases 1 to 3 cannot be verified until
-these are resolved.
+The dev pipeline (`cd-dev.yml`) is verified end to end: build, sign, and upload to Firebase
+App Distribution.
 
 | Item | Status |
 |---|---|
-| `KEYSTORE_BASE64` secret | corrupt — regenerate with `base64 -i release.jks \| tr -d '\n'` |
-| `FIREBASE_APP_ID_DEV` secret | not yet created |
+| `KEYSTORE_BASE64`, `KEY_ALIAS`, `KEY_PASSWORD`, `STORE_PASSWORD` secrets | done |
+| `FIREBASE_APP_ID_DEV` secret | done |
+| `FIREBASE_SERVICE_ACCOUNT` secret | done |
+| Firebase app for dev (`com.example.poc_cicd1.dev`) | done |
 | Firebase apps for uat and prod | not yet created |
-| Firebase tester groups | only `testers` exists |
+| Firebase tester groups | only `testers` exists; `uat-testers`, `production`, `live` not yet created |
+
+### Lessons for the real project
+
+- The upload step fails with `Failed to authenticate, have you run firebase login?` when
+  `FIREBASE_SERVICE_ACCOUNT` is missing or empty.
+- The upload step fails with `HTTP Error: 403, The caller does not have permission` when
+  the service account only has its default roles. The default
+  `Firebase App Distribution Admin SDK Service Agent` role is not enough; add
+  `Firebase App Distribution Admin` in Google Cloud IAM.
 
 ---
 

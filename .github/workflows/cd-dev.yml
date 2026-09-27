@@ -1,8 +1,6 @@
 name: CD dev - Firebase App Distribution
 
 on:
-  push:
-    branches: ['release/**']
   workflow_dispatch:
     inputs:
       release_notes:
