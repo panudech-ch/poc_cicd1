@@ -111,7 +111,7 @@ variables, never from the repository.
 
 | Lane / command | Uploads | Destination | Status |
 |---|---|---|---|
-| `firebase_app_distribution_release` | dev release APK | Firebase, group `testers` | implemented, pending CI run |
+| `firebase_app_distribution_release` | dev release APK | Firebase, group `testers` | done, verified by `cd-dev.yml` run #6 |
 | `uat_firebase_app_distribution_release` | uat release APK | Firebase, group `uat-testers` | blocked: no uat Firebase app |
 | `prod_firebase_app_distribution_release` | prod release APK | Firebase, group `production` | blocked: no prod Firebase app |
 | `prod_firebase_app_distribution_live_release` | prod release APK | Firebase, group `live` | blocked: no prod Firebase app |
