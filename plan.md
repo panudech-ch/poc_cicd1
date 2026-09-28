@@ -111,10 +111,10 @@ variables, never from the repository.
 
 | Lane / command | Uploads | Destination | Status |
 |---|---|---|---|
-| `firebase_app_distribution_release` | dev release APK | Firebase, group `testers` | done, verified by `cd-dev.yml` run #6 |
-| `uat_firebase_app_distribution_release` | uat release APK | Firebase, group `uat-testers` | implemented, pending CI run |
-| `prod_firebase_app_distribution_release` | prod release APK | Firebase, group `production` | implemented, pending CI run |
-| `prod_firebase_app_distribution_live_release` | prod release APK | Firebase, group `live` | implemented, pending CI run |
+| `firebase_app_distribution_release` | dev release APK | Firebase, group `testers` | done, verified by `cd-dev.yml` run #6 and `cd-android.yml` run #1 |
+| `uat_firebase_app_distribution_release` | uat release APK | Firebase, group `uat-testers` | done, verified by `cd-android.yml` run #2 |
+| `prod_firebase_app_distribution_release` | prod release APK | Firebase, group `production` | done, verified by `cd-android.yml` run #3 |
+| `prod_firebase_app_distribution_live_release` | prod release APK | Firebase, group `live` | done, verified by `cd-android.yml` run #4 |
 | `supply --track internal` | prod release AAB | Google Play, internal track | blocked: no Play Console app |
 
 As in the reference, only the dev lane takes `build_number`.
@@ -166,6 +166,9 @@ Environments with required reviewers is the equivalent mechanism.
 | `ci.yml` | `workflow_dispatch` | reference `Unit Test` stage |
 | `cd-android.yml` | `workflow_dispatch` (schedule not yet added) | all Android deploy stages; replaced `cd-dev.yml` |
 | `cd-ios.yml` | `workflow_dispatch` | all iOS deploy stages (phase 5) |
+
+`cd-android.yml` is verified for every environment: runs #1 to #4 (dev, uat, prod, live)
+all succeeded from the same commit on `main`.
 
 A single Android workflow parameterised by environment replaces the reference's separate
 stage per environment. The stage-per-environment layout exists because GitLab renders
