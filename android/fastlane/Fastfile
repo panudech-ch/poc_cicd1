@@ -1,17 +1,35 @@
 default_platform(:android)
 
+def distribute(app_id_env:, apk:, groups:)
+  firebase_app_distribution(
+    app: ENV.fetch(app_id_env),
+    service_credentials_file: ENV.fetch("FIREBASE_SERVICE_CREDENTIALS_FILE"),
+    android_artifact_type: "APK",
+    android_artifact_path: "../build/app/outputs/flutter-apk/#{apk}",
+    groups: groups,
+    release_notes: ENV["RELEASE_NOTES"]
+  )
+end
+
 platform :android do
   desc "Upload the dev release APK to Firebase App Distribution"
   lane :firebase_app_distribution_release do |options|
     UI.message("Distributing dev build #{options[:build_number]}")
+    distribute(app_id_env: "FIREBASE_APP_ID_DEV", apk: "app-dev-release.apk", groups: "testers")
+  end
 
-    firebase_app_distribution(
-      app: ENV.fetch("FIREBASE_APP_ID_DEV"),
-      service_credentials_file: ENV.fetch("FIREBASE_SERVICE_CREDENTIALS_FILE"),
-      android_artifact_type: "APK",
-      android_artifact_path: "../build/app/outputs/flutter-apk/app-dev-release.apk",
-      groups: "testers",
-      release_notes: ENV["RELEASE_NOTES"]
-    )
+  desc "Upload the uat release APK to Firebase App Distribution"
+  lane :uat_firebase_app_distribution_release do
+    distribute(app_id_env: "FIREBASE_APP_ID_UAT", apk: "app-uat-release.apk", groups: "uat-testers")
+  end
+
+  desc "Upload the prod release APK to Firebase App Distribution"
+  lane :prod_firebase_app_distribution_release do
+    distribute(app_id_env: "FIREBASE_APP_ID_PROD", apk: "app-prod-release.apk", groups: "production")
+  end
+
+  desc "Upload the prod release APK to the live testers on Firebase App Distribution"
+  lane :prod_firebase_app_distribution_live_release do
+    distribute(app_id_env: "FIREBASE_APP_ID_PROD", apk: "app-prod-release.apk", groups: "live")
   end
 end

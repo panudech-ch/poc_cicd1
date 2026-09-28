@@ -1,23 +1,30 @@
-name: CD dev - Firebase App Distribution
+name: CD Android - Firebase App Distribution
 
 on:
   workflow_dispatch:
     inputs:
+      environment:
+        description: "Target environment"
+        required: true
+        type: choice
+        options: [dev, uat, prod, live]
       release_notes:
         description: "Release notes shown to testers"
         required: false
         default: "Manual build from workflow_dispatch"
 
 concurrency:
-  group: cd-dev-${{ github.ref }}
+  group: cd-android-${{ inputs.environment }}-${{ github.ref }}
   cancel-in-progress: false
 
 env:
   FLUTTER_VERSION: "3.44.4"
+  ENVIRONMENT: ${{ inputs.environment }}
+  BUILD_NUMBER: ${{ github.run_number }}
 
 jobs:
   distribute:
-    name: Build and distribute dev APK
+    name: Build and distribute ${{ inputs.environment }} APK
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -61,13 +68,20 @@ jobs:
           EOF
 
       - name: Build release APK
-        run: flutter build apk -t lib/main_dev.dart --flavor dev --release --build-number ${{ github.run_number }}
+        run: |
+          case "$ENVIRONMENT" in
+            dev)       flutter build apk -t lib/main_dev.dart --flavor dev --release --build-number "$BUILD_NUMBER" ;;
+            uat)       flutter build apk -t lib/main_uat.dart --flavor uat --release ;;
+            prod|live) flutter build apk -t lib/main_prod.dart --flavor prod --release ;;
+          esac
 
       - name: Compose release notes
         id: notes
+        env:
+          INPUT_NOTES: ${{ inputs.release_notes }}
         run: |
-          if [ -n "${{ github.event.inputs.release_notes }}" ]; then
-            NOTES="${{ github.event.inputs.release_notes }}"
+          if [ -n "$INPUT_NOTES" ]; then
+            NOTES="$INPUT_NOTES"
           else
             NOTES="$(git log -1 --pretty=format:'%s')"
           fi
@@ -75,6 +89,7 @@ jobs:
             echo "text<<EOF"
             echo "$NOTES"
             echo ""
+            echo "Env: $ENVIRONMENT"
             echo "Commit: ${GITHUB_SHA:0:7} on ${GITHUB_REF_NAME}"
             echo "EOF"
           } >> "$GITHUB_OUTPUT"
@@ -88,9 +103,17 @@ jobs:
         working-directory: android
         env:
           FIREBASE_APP_ID_DEV: ${{ secrets.FIREBASE_APP_ID_DEV }}
+          FIREBASE_APP_ID_UAT: ${{ secrets.FIREBASE_APP_ID_UAT }}
+          FIREBASE_APP_ID_PROD: ${{ secrets.FIREBASE_APP_ID_PROD }}
           FIREBASE_SERVICE_CREDENTIALS_FILE: ${{ runner.temp }}/firebase-service-account.json
           RELEASE_NOTES: ${{ steps.notes.outputs.text }}
-        run: bundle exec fastlane firebase_app_distribution_release build_number:${{ github.run_number }}
+        run: |
+          case "$ENVIRONMENT" in
+            dev)  bundle exec fastlane firebase_app_distribution_release build_number:"$BUILD_NUMBER" ;;
+            uat)  bundle exec fastlane uat_firebase_app_distribution_release ;;
+            prod) bundle exec fastlane prod_firebase_app_distribution_release ;;
+            live) bundle exec fastlane prod_firebase_app_distribution_live_release ;;
+          esac
 
       - name: Clean up signing material
         if: always()
