@@ -33,9 +33,10 @@ Localization is specific to the reference project and is out of scope here.
 
 ---
 
-## Phase 1 — Foundation
+## Phase 1 — Foundation (done)
 
-Everything downstream depends on this phase.
+Everything downstream depends on this phase. Verified: `cd-dev.yml` run #5 delivered
+`1.0.0-dev (5)` to testers.
 
 ### 1.1 Add the `uat` flavor
 
@@ -94,23 +95,29 @@ run the exact same deploy from their own machine.
 
 ```
 android/
-  Gemfile               pins fastlane
+  Gemfile               fastlane, loads Pluginfile
+  Gemfile.lock          pinned versions
   fastlane/
     Fastfile            lane definitions
-    Appfile             package name, Firebase app ids
+    Appfile             package name
+    Pluginfile          fastlane-plugin-firebase_app_distribution
 ```
 
 ### 2.2 Lanes
 
-| Lane | Builds | Destination |
-|---|---|---|
-| `dev_firebase` | dev release APK | Firebase, group `testers` |
-| `uat_firebase` | uat release APK | Firebase, group `uat-testers` |
-| `prod_firebase` | prod release APK | Firebase, group `production` |
-| `live_firebase` | prod release APK | Firebase, group `live` |
-| `prod_play_internal` | prod release AAB | Google Play, internal track |
+Lane names and scope follow the reference. The CI file runs `flutter build`; the lane only
+uploads the artifact that build produced. App ids and credentials come from environment
+variables, never from the repository.
 
-Each lane takes `build_number` as a parameter, mirroring the reference pipeline.
+| Lane / command | Uploads | Destination | Status |
+|---|---|---|---|
+| `firebase_app_distribution_release` | dev release APK | Firebase, group `testers` | done, verified by `cd-dev.yml` run #6 |
+| `uat_firebase_app_distribution_release` | uat release APK | Firebase, group `uat-testers` | implemented, pending CI run |
+| `prod_firebase_app_distribution_release` | prod release APK | Firebase, group `production` | implemented, pending CI run |
+| `prod_firebase_app_distribution_live_release` | prod release APK | Firebase, group `live` | implemented, pending CI run |
+| `supply --track internal` | prod release AAB | Google Play, internal track | blocked: no Play Console app |
+
+As in the reference, only the dev lane takes `build_number`.
 
 ### 2.3 Required credentials
 
@@ -157,7 +164,7 @@ Environments with required reviewers is the equivalent mechanism.
 | File | Trigger | Replaces |
 |---|---|---|
 | `ci.yml` | `workflow_dispatch` | reference `Unit Test` stage |
-| `cd-android.yml` | `workflow_dispatch` + `schedule` | all Android deploy stages |
+| `cd-android.yml` | `workflow_dispatch` (schedule not yet added) | all Android deploy stages; replaced `cd-dev.yml` |
 | `cd-ios.yml` | `workflow_dispatch` | all iOS deploy stages (phase 5) |
 
 A single Android workflow parameterised by environment replaces the reference's separate
@@ -206,15 +213,32 @@ hosted rate.
 
 ## Outstanding items
 
-Carried over from earlier work in this repository; phases 1 to 3 cannot be verified until
-these are resolved.
+The dev pipeline is verified end to end: build, sign, and upload to Firebase App
+Distribution. `cd-android.yml` now serves every environment.
 
 | Item | Status |
 |---|---|
-| `KEYSTORE_BASE64` secret | corrupt — regenerate with `base64 -i release.jks \| tr -d '\n'` |
-| `FIREBASE_APP_ID_DEV` secret | not yet created |
-| Firebase apps for uat and prod | not yet created |
-| Firebase tester groups | only `testers` exists |
+| `KEYSTORE_BASE64`, `KEY_ALIAS`, `KEY_PASSWORD`, `STORE_PASSWORD` secrets | done |
+| `FIREBASE_APP_ID_DEV`, `FIREBASE_APP_ID_UAT`, `FIREBASE_APP_ID_PROD` secrets | done |
+| `FIREBASE_SERVICE_ACCOUNT` secret | done |
+| Firebase app for dev (`com.example.poc_cicd1.dev`) | done |
+| Firebase apps for uat and prod | done |
+| Firebase tester groups `testers`, `uat-testers`, `production`, `live` | done |
+| `schedule` for dev nightly | cron time used by the reference is not known |
+
+### Lessons for the real project
+
+- The upload step fails with `Failed to authenticate, have you run firebase login?` when
+  `FIREBASE_SERVICE_ACCOUNT` is missing or empty.
+- The upload step fails with `HTTP Error: 403, The caller does not have permission` when
+  the service account only has its default roles. The default
+  `Firebase App Distribution Admin SDK Service Agent` role is not enough; add
+  `Firebase App Distribution Admin` in Google Cloud IAM.
+- `github.run_number` restarts at 1 whenever a workflow file is created or renamed
+  (`cd-dev.yml` reached run #6; `cd-android.yml` starts again at 1). Moving from GitLab
+  `CI_PIPELINE_ID` to GitHub run numbers has the same effect. Firebase accepts a lower build
+  number; Google Play does not, so the real project needs an offset before the first Play
+  upload from GitHub.
 
 ---
 

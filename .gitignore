@@ -47,3 +47,8 @@ app.*.map.json
 /android/key.properties
 *.jks
 *.keystore
+
+# Fastlane related
+/android/.bundle/
+/android/vendor/bundle/
+/android/fastlane/report.xml
